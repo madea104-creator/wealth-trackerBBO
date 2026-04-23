@@ -45,6 +45,33 @@ jobs:
                           continue
                   return raw.decode('utf-8', errors='ignore')
 
+          def batch_getStockInfo(codes, exchange):
+              """用 getStockInfo 批次查報價，每批30支"""
+              prices = {}
+              batch_size = 30
+              for i in range(0, len(codes), batch_size):
+                  batch = codes[i:i+batch_size]
+                  ex_ch = '|'.join(f'{exchange}_{c}.tw' for c in batch)
+                  try:
+                      url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}&json=1&delay=0'
+                      content = fetch(url, timeout=15)
+                      data = json.loads(content)
+                      for item in data.get('msgArray', []):
+                          ticker = str(item.get('c', '')).strip()
+                          if not ticker: continue
+                          z = str(item.get('z', '-')).strip()
+                          y = str(item.get('y', '-')).strip()
+                          close = z if z not in ('-', '') else y
+                          if not close or close in ('-', ''): continue
+                          try:
+                              price = float(close)
+                              if price > 0:
+                                  prices[ticker] = price
+                          except: pass
+                  except: pass
+                  time.sleep(0.3)
+              return prices
+
           now_tw   = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
           roc_year = now_tw.year - 1911
           roc_date = f"{roc_year}/{now_tw.month:02d}/{now_tw.day:02d}"
@@ -121,105 +148,66 @@ jobs:
                   print(f"  FAIL (OpenAPI): {e}")
           time.sleep(2)
 
-          # ── 3. 可轉換公司債（CB）全市場掃描 ─────────────────────
-          # CB 代號規則：母股代號(4碼) + 發行次數(1碼，1-9 A-Z)
-          # 用 getStockInfo 批次查，一次30支，自動掃出所有在市 CB
-          print("\n[3] 可轉換公司債（CB）全市場掃描...")
+          # ── 3. 可轉換公司債（CB）─────────────────────────────────
+          # 從 TPEx 已發行 CB 清單取得所有在市 CB 代號，再批次查報價
+          print("\n[3] 可轉換公司債（CB）...")
+          cb_codes_otc = []
+          cb_codes_tse = []
 
-          # 先取得所有上市+上櫃股票代號作為母股清單
-          all_parent_codes = set()
+          # 上櫃CB清單（TPEx 已上櫃轉換公司債）
           try:
-              # 上市母股代號
+              url = f'https://www.tpex.org.tw/web/bond/publish/convertible_search/code_table/cb_treaty_result.php?l=zh-tw&_={int(time.time())}'
+              content = fetch(url)
+              data = json.loads(content)
+              rows = data.get('aaData', data if isinstance(data, list) else [])
+              for row in rows:
+                  code = str(row[0] if isinstance(row, list) else row.get('代號', '')).strip()
+                  if code and len(code) == 5:
+                      cb_codes_otc.append(code)
+              print(f"  上櫃CB清單: {len(cb_codes_otc)} 支")
+          except Exception as e:
+              print(f"  上櫃CB清單 FAIL: {e}")
+
+          # 上市CB清單（TWSE）
+          try:
               url = 'https://openapi.twse.com.tw/v1/opendata/t187ap03_L'
               content = fetch(url)
               items = json.loads(content)
               for x in items:
+                  typ = str(x.get('有價證券別', '')).strip()
                   code = str(x.get('公司代號', '')).strip()
-                  if code and len(code) == 4:
-                      all_parent_codes.add(code)
-              print(f"  上市母股: {len(all_parent_codes)} 筆")
+                  if '轉換' in typ and len(code) == 5:
+                      cb_codes_tse.append(code)
+              print(f"  上市CB清單: {len(cb_codes_tse)} 支")
           except Exception as e:
-              print(f"  上市母股 FAIL: {e}")
+              print(f"  上市CB清單 FAIL: {e}")
 
-          try:
-              # 上櫃母股代號
-              url = 'https://www.tpex.org.tw/openapi/v1/tpex_listed_companies'
-              content = fetch(url)
-              items = json.loads(content)
-              for x in items:
-                  code = str(x.get('SecuritiesCompanyCode', x.get('公司代號', ''))).strip()
-                  if code and len(code) in [4, 5]:
-                      all_parent_codes.add(code[:4])
-              print(f"  加入上櫃母股後: {len(all_parent_codes)} 筆")
-          except Exception as e:
-              print(f"  上櫃母股 FAIL: {e}")
-
-          # 產生所有可能的 CB 代號：母股代號 + 1~9 + A~F
-          suffixes = [str(i) for i in range(1, 10)] + ['A', 'B', 'C', 'D', 'E', 'F']
-          cb_candidates = []
-          for code in sorted(all_parent_codes):
-              for s in suffixes:
-                  cb_candidates.append(code + s)
-
-          print(f"  CB候選代號: {len(cb_candidates)} 個，開始批次查詢...")
-
-          # 批次查詢，每批30個，同時試 otc_ 和 tse_
-          cb_count = 0
-          batch_size = 30
-
-          for ex in ['otc', 'tse']:
-              for i in range(0, len(cb_candidates), batch_size):
-                  batch = cb_candidates[i:i+batch_size]
-                  ex_ch = '|'.join(f'{ex}_{c}.tw' for c in batch)
-                  try:
-                      url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}&json=1&delay=0'
-                      content = fetch(url, timeout=15)
-                      data = json.loads(content)
-                      for item in data.get('msgArray', []):
-                          ticker = str(item.get('c', '')).strip()
-                          if not ticker: continue
-                          # 確認是CB（代號5碼且最後一碼是數字或字母）
-                          if len(ticker) != 5: continue
-                          z = str(item.get('z', '-')).strip()
-                          y = str(item.get('y', '-')).strip()
-                          close = z if z not in ('-', '') else y
-                          if not close or close in ('-', ''): continue
-                          try:
-                              price = float(close)
-                              if price > 0 and ticker not in result:
-                                  result[ticker] = {'price': price, 'ccy': 'TWD', 'src': f'{ex}_cb'}
-                                  cb_count += 1
-                          except: pass
-                  except: pass
-                  time.sleep(0.2)
-
-          # 也從 tickers.json 補充手動指定的 CB
+          # 從 tickers.json 補充手動指定的 CB
           try:
               with open('tickers.json', 'r') as f:
                   tickers_cfg = json.load(f)
               manual_cb = tickers_cfg.get('cb', [])
-              for ticker in manual_cb:
-                  if ticker in result: continue
-                  for ex in ['otc', 'tse']:
-                      try:
-                          url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex}_{ticker}.tw&json=1&delay=0'
-                          content = fetch(url, timeout=10)
-                          data = json.loads(content)
-                          items = data.get('msgArray', [])
-                          if not items: continue
-                          item = items[0]
-                          z = str(item.get('z', '-')).strip()
-                          y = str(item.get('y', '-')).strip()
-                          close = z if z not in ('-', '') else y
-                          if not close or close in ('-', ''): continue
-                          price = float(close)
-                          if price > 0:
-                              result[ticker] = {'price': price, 'ccy': 'TWD', 'src': f'{ex}_cb'}
-                              cb_count += 1
-                              print(f"  ✓ 手動CB {ticker}: {price}")
-                              break
-                      except: pass
+              if manual_cb:
+                  print(f"  手動指定CB: {manual_cb}")
+                  # 手動的先試 otc 再試 tse
+                  cb_codes_otc = list(set(cb_codes_otc + manual_cb))
           except: pass
+
+          # 批次查報價
+          cb_count = 0
+          if cb_codes_otc:
+              prices = batch_getStockInfo(cb_codes_otc, 'otc')
+              for ticker, price in prices.items():
+                  if ticker not in result:
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'otc_cb'}
+                      cb_count += 1
+
+          if cb_codes_tse:
+              prices = batch_getStockInfo(cb_codes_tse, 'tse')
+              for ticker, price in prices.items():
+                  if ticker not in result:
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'tse_cb'}
+                      cb_count += 1
 
           print(f"  CB 合計: {cb_count} 筆")
           time.sleep(1)
