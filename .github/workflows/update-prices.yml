@@ -1,0 +1,147 @@
+name: Update Stock Prices
+
+on:
+  schedule:
+    - cron: '30 6 * * 1-5'   # 台灣時間 14:30（週一到週五收盤後）
+    - cron: '0 1 * * 1-5'    # 台灣時間 09:00（開盤前，抓昨收）
+  workflow_dispatch:           # 允許手動觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch prices and write prices.json
+        run: |
+          python3 << 'EOF'
+          import urllib.request
+          import json
+          import time
+
+          result = {}
+
+          # 讀取 tickers.json 取得要抓的清單
+          try:
+              with open('tickers.json', 'r') as f:
+                  tickers = json.load(f)
+          except:
+              tickers = {"tw": [], "two": [], "cb": [], "us": [], "crypto": []}
+
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'application/json'
+          }
+
+          # ── 台股上市（TSE）──────────────────────────────────
+          for ticker in tickers.get('tw', []):
+              try:
+                  url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{ticker}.tw&json=1&delay=0'
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      data = json.loads(r.read())
+                  item = data.get('msgArray', [{}])[0]
+                  z = item.get('z', '-')
+                  y = item.get('y', '-')
+                  price = float(z) if z != '-' else float(y) if y != '-' else None
+                  if price:
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'twse'}
+                      print(f'✓ {ticker}: {price}')
+              except Exception as e:
+                  print(f'✗ {ticker}: {e}')
+              time.sleep(0.3)
+
+          # ── 台股上櫃（OTC）──────────────────────────────────
+          for ticker in tickers.get('two', []):
+              try:
+                  url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{ticker}.tw&json=1&delay=0'
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      data = json.loads(r.read())
+                  item = data.get('msgArray', [{}])[0]
+                  z = item.get('z', '-')
+                  y = item.get('y', '-')
+                  price = float(z) if z != '-' else float(y) if y != '-' else None
+                  if price:
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'otc'}
+                      print(f'✓ {ticker}: {price}')
+              except Exception as e:
+                  print(f'✗ {ticker}: {e}')
+              time.sleep(0.3)
+
+          # ── 可轉債（CB）────────────────────────────────────
+          for ticker in tickers.get('cb', []):
+              fetched = False
+              for ex in ['tse', 'otc']:
+                  try:
+                      url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex}_{ticker}.tw&json=1&delay=0'
+                      req = urllib.request.Request(url, headers=headers)
+                      with urllib.request.urlopen(req, timeout=10) as r:
+                          data = json.loads(r.read())
+                      item = data.get('msgArray', [{}])[0]
+                      z = item.get('z', '-')
+                      y = item.get('y', '-')
+                      price = float(z) if z != '-' else float(y) if y != '-' else None
+                      if price:
+                          result[ticker] = {'price': price, 'ccy': 'TWD', 'src': ex}
+                          print(f'✓ CB {ticker}: {price}')
+                          fetched = True
+                          break
+                  except Exception as e:
+                      print(f'✗ CB {ticker}/{ex}: {e}')
+                  time.sleep(0.3)
+
+          # ── 美股（Yahoo Finance）───────────────────────────
+          for ticker in tickers.get('us', []):
+              try:
+                  url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d'
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      data = json.loads(r.read())
+                  price = data['chart']['result'][0]['meta']['regularMarketPrice']
+                  if price:
+                      result[ticker] = {'price': price, 'ccy': 'USD', 'src': 'yahoo'}
+                      print(f'✓ {ticker}: {price}')
+              except Exception as e:
+                  print(f'✗ {ticker}: {e}')
+              time.sleep(0.5)
+
+          # ── 加密貨幣（CoinGecko）──────────────────────────
+          crypto_list = tickers.get('crypto', [])
+          if crypto_list:
+              try:
+                  ids = ','.join(crypto_list)
+                  url = f'https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=twd'
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      data = json.loads(r.read())
+                  for cid in crypto_list:
+                      price = data.get(cid, {}).get('twd')
+                      if price:
+                          result[cid] = {'price': price, 'ccy': 'TWD', 'src': 'coingecko'}
+                          print(f'✓ {cid}: {price}')
+              except Exception as e:
+                  print(f'✗ crypto batch: {e}')
+
+          # 寫入 prices.json
+          import datetime
+          output = {
+              'updated': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'prices': result
+          }
+          with open('prices.json', 'w') as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+          print(f'\n寫入 prices.json，共 {len(result)} 筆')
+          EOF
+
+      - name: Commit prices.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add prices.json
+          git diff --staged --quiet || git commit -m "chore: update prices $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
