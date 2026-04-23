@@ -34,10 +34,17 @@ jobs:
               'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
           }
 
-          def fetch(url, timeout=20):
+          def fetch(url, timeout=60):
               req = urllib.request.Request(url, headers=headers)
               with urllib.request.urlopen(req, timeout=timeout) as r:
-                  raw = r.read()
+                  # 分塊讀取，避免大檔案 IncompleteRead
+                  chunks = []
+                  while True:
+                      chunk = r.read(65536)
+                      if not chunk:
+                          break
+                      chunks.append(chunk)
+                  raw = b''.join(chunks)
                   for enc in ['utf-8-sig', 'utf-8', 'big5', 'cp950']:
                       try:
                           return raw.decode(enc, errors='strict')
@@ -154,19 +161,38 @@ jobs:
           cb_codes_otc = []
           cb_codes_tse = []
 
-          # 上櫃CB清單（TPEx 已上櫃轉換公司債）
-          try:
-              url = f'https://www.tpex.org.tw/web/bond/publish/convertible_search/code_table/cb_treaty_result.php?l=zh-tw&_={int(time.time())}'
-              content = fetch(url)
-              data = json.loads(content)
-              rows = data.get('aaData', data if isinstance(data, list) else [])
-              for row in rows:
-                  code = str(row[0] if isinstance(row, list) else row.get('代號', '')).strip()
-                  if code and len(code) == 5:
-                      cb_codes_otc.append(code)
-              print(f"  上櫃CB清單: {len(cb_codes_otc)} 支")
-          except Exception as e:
-              print(f"  上櫃CB清單 FAIL: {e}")
+          # 上櫃CB清單 - 試多個 endpoint
+          for cb_url in [
+              f'https://www.tpex.org.tw/web/bond/publish/convertible_search/code_table/cb_treaty_result.php?l=zh-tw&_={int(time.time())}',
+              f'https://www.tpex.org.tw/openapi/v1/tpex_cb_listed_info',
+              f'https://www.tpex.org.tw/web/bond/search/daily/bd_daily_result.php?l=zh-tw&d={roc_date}&t=C&_={int(time.time())}',
+          ]:
+              try:
+                  content_cb = fetch(cb_url, timeout=30)
+                  # 試 JSON
+                  try:
+                      data = json.loads(content_cb)
+                      rows = data.get('aaData', data if isinstance(data, list) else [])
+                      for row in rows:
+                          if isinstance(row, list):
+                              code = str(row[0]).strip()
+                          else:
+                              code = str(row.get('代號', row.get('SecuritiesCompanyCode', ''))).strip()
+                          if code and len(code) == 5:
+                              cb_codes_otc.append(code)
+                  except:
+                      # 試 CSV
+                      reader = csv.reader(io.StringIO(content_cb))
+                      for i, row in enumerate(reader):
+                          if i < 2 or len(row) < 1: continue
+                          code = str(row[0]).strip()
+                          if code and len(code) == 5:
+                              cb_codes_otc.append(code)
+                  if cb_codes_otc:
+                      print(f"  上櫃CB清單: {len(cb_codes_otc)} 支")
+                      break
+              except Exception as e:
+                  print(f"  上櫃CB清單 FAIL ({cb_url.split('/')[-1]}): {e}")
 
           # 上市CB清單（TWSE）
           try:
