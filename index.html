@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wealth">
+<title>Wealth Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #151c28; --surface: #1e2738; --surface2: #253044;
+    --border: #2e3f58; --border2: #3d5270;
+    --accent: #f5d87a; --accent-dim: rgba(245,216,122,0.12);
+    --text: #eef2fa; --dim: #7a9abf; --dim2: #4e6a8a;
+    --green: #4ecb8e; --red: #f07060;
+    --mono: 'DM Mono', monospace; --sans: 'Noto Sans TC', sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans);
+    min-height:100vh; padding-bottom:env(safe-area-inset-bottom); }
+  .app { max-width:580px; margin:0 auto; padding:20px 16px 100px; }
+
+  /* Header */
+  .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .logo { font-size:18px; font-weight:700; color:var(--accent); }
+  .btn-refresh { display:flex; align-items:center; gap:6px; padding:7px 14px;
+    background:transparent; border:1px solid var(--border2); color:var(--dim);
+    border-radius:8px; font-size:13px; cursor:pointer; font-family:var(--sans); }
+  .btn-refresh.loading { opacity:.5; pointer-events:none; }
+  .spin { display:inline-block; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* Hero */
+  .hero { background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding:24px 20px; margin-bottom:12px; }
+  .hero-label { font-size:11px; color:var(--dim); letter-spacing:.8px; text-transform:uppercase; }
+  .hero-amount { font-size:34px; font-weight:700; color:var(--accent);
+    font-family:var(--mono); margin:6px 0 16px; }
+  .hero-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1px;
+    background:var(--border); border-radius:8px; overflow:hidden; }
+  .stat { background:var(--surface2); padding:10px 12px; }
+  .stat-label { font-size:10px; color:var(--dim); margin-bottom:3px; }
+  .stat-val { font-size:13px; font-weight:700; font-family:var(--mono); }
+
+  /* Rate bar */
+  .rate-bar { background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:9px 14px; margin-bottom:12px;
+    display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .rate-item { font-size:12px; color:var(--dim); }
+  .rate-item span { color:var(--text); font-family:var(--mono); }
+  .rate-updated { font-size:11px; color:var(--dim2); margin-left:auto; }
+
+  /* Section */
+  .section-label { font-size:10px; color:var(--dim2); letter-spacing:.8px;
+    text-transform:uppercase; margin:14px 0 7px; padding-left:2px; }
+
+  /* Asset card */
+  .asset-card { background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:13px 15px; margin-bottom:7px;
+    display:flex; align-items:center; gap:12px; cursor:pointer;
+    transition:border-color .15s; -webkit-user-select:none; }
+  .asset-card:active { border-color:var(--border2); background:var(--surface2); }
+  .asset-icon { width:36px; height:36px; border-radius:9px; display:flex;
+    align-items:center; justify-content:center; font-size:13px; font-weight:700;
+    flex-shrink:0; letter-spacing:-.5px; }
+  .asset-info { flex:1; min-width:0; }
+  .asset-name { font-size:14px; font-weight:700; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  .asset-meta { font-size:11px; color:var(--dim); margin-top:2px; font-family:var(--mono); }
+  .asset-right { text-align:right; flex-shrink:0; }
+  .asset-value { font-size:14px; font-weight:700; font-family:var(--mono); }
+  .asset-pct { font-size:11px; color:var(--dim); margin-top:2px; }
+
+  /* Subtotal row */
+  .subtotal { display:flex; justify-content:space-between; align-items:center;
+    padding:6px 4px 10px; margin-top:2px; }
+  .subtotal-label { font-size:11px; color:var(--dim2); }
+  .subtotal-val { font-size:13px; font-weight:700; font-family:var(--mono); color:var(--dim); }
+
+  /* Import/Export */
+  .btn-io { padding:7px 12px; background:transparent; border:1px solid var(--border2);
+    color:var(--dim); border-radius:8px; font-size:13px; cursor:pointer;
+    font-family:var(--sans); }
+  .btn-io:hover { border-color:var(--accent); color:var(--accent); }
+  .header-right { display:flex; gap:8px; align-items:center; }
+
+  /* FAB */
+  .fab { position:fixed; bottom:calc(20px + env(safe-area-inset-bottom));
+    right:50%; transform:translateX(50%); max-width:548px; width:calc(100% - 32px);
+    padding:15px; background:var(--accent); color:#151c28; border:none;
+    border-radius:12px; font-weight:700; font-size:15px; cursor:pointer;
+    font-family:var(--sans); box-shadow:0 4px 24px rgba(245,216,122,.2); }
+
+  /* Overlay & Sheet */
+  .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
+    z-index:200; align-items:flex-end; justify-content:center; }
+  .overlay.open { display:flex; }
+  .sheet { background:var(--surface); width:100%; max-width:580px;
+    border-radius:20px 20px 0 0; padding:20px 18px calc(32px + env(safe-area-inset-bottom));
+    max-height:92vh; overflow-y:auto; animation:slideUp .22s ease; }
+  @keyframes slideUp { from { transform:translateY(30px); opacity:0; } }
+  .sheet-handle { width:36px; height:4px; background:var(--border2);
+    border-radius:2px; margin:0 auto 18px; }
+  .sheet h3 { font-size:16px; font-weight:700; margin-bottom:18px; }
+
+  /* Form */
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:11px; color:var(--dim); margin-bottom:5px;
+    letter-spacing:.5px; text-transform:uppercase; }
+  .field input, .field select {
+    width:100%; background:var(--surface2); border:1px solid var(--border);
+    padding:11px 13px; color:var(--text); border-radius:9px;
+    font-size:15px; font-family:var(--sans); outline:none;
+    -webkit-appearance:none; appearance:none; }
+  .field select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237a9abf' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 12px center;
+    padding-right:34px; }
+  .field select option { background:#1e2738; }
+  .field input:focus, .field select:focus { border-color:var(--accent); }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .hint { font-size:11px; color:var(--dim2); margin-top:5px; line-height:1.5; }
+
+  /* Buttons */
+  .btn-save { width:100%; padding:14px; background:var(--accent); color:#151c28;
+    border:none; border-radius:10px; font-weight:700; font-size:15px;
+    cursor:pointer; font-family:var(--sans); margin-top:6px; }
+  .btn-save:disabled { opacity:.5; }
+  .btn-cancel { width:100%; background:transparent; border:none; color:var(--dim);
+    padding:11px; cursor:pointer; font-size:14px; font-family:var(--sans); margin-top:2px; }
+
+  /* Detail */
+  .detail-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .detail-icon { width:46px; height:46px; border-radius:12px; display:flex;
+    align-items:center; justify-content:center; font-size:14px; font-weight:700; }
+  .detail-value-big { font-size:28px; font-weight:700; font-family:var(--mono);
+    color:var(--accent); margin:4px 0 14px; }
+  .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:18px; }
+  .detail-cell { background:var(--surface2); border-radius:8px; padding:11px; }
+  .detail-cell-label { font-size:10px; color:var(--dim); margin-bottom:3px; text-transform:uppercase; letter-spacing:.4px; }
+  .detail-cell-val { font-size:13px; font-weight:700; font-family:var(--mono); }
+  .btn-row { display:flex; gap:8px; }
+  .btn-edit-d { flex:1; padding:12px; background:var(--accent-dim);
+    border:1px solid var(--border2); color:var(--accent); border-radius:8px;
+    font-size:14px; cursor:pointer; font-family:var(--sans); font-weight:700; }
+  .btn-del-d { padding:12px 16px; background:rgba(240,112,96,.1);
+    border:1px solid rgba(240,112,96,.3); color:var(--red); border-radius:8px;
+    font-size:14px; cursor:pointer; font-family:var(--sans); }
+  .btn-del-d.confirm { background:var(--red); color:#fff; border-color:var(--red); }
+
+  /* Toast */
+  .toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+    background:var(--surface2); border:1px solid var(--border2); color:var(--text);
+    padding:9px 18px; border-radius:8px; font-size:13px; z-index:300;
+    opacity:0; transition:.25s; pointer-events:none; white-space:nowrap; }
+  .toast.show { opacity:1; }
+
+  /* Empty */
+  .empty { text-align:center; padding:48px 20px; color:var(--dim); }
+  .empty p { font-size:14px; line-height:1.7; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div class="logo">⬡ Wealth</div>
+    <div class="header-right">
+      <button class="btn-io" onclick="exportData()" title="匯出資料">⬇ 匯出</button>
+      <button class="btn-io" onclick="document.getElementById('importFile').click()" title="匯入資料">⬆ 匯入</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+      <button class="btn-refresh" id="refBtn" onclick="refreshAll()">
+        <span id="refIcon">↻</span> 更新
+      </button>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="hero-label">總資產淨值 TWD</div>
+    <div class="hero-amount" id="totalValue">NT$ 0</div>
+    <div class="hero-stats">
+      <div class="stat"><div class="stat-label">投資部位</div><div class="stat-val" id="sInvest">—</div></div>
+      <div class="stat"><div class="stat-label">現金存款</div><div class="stat-val" id="sCash">—</div></div>
+      <div class="stat"><div class="stat-label">資產項數</div><div class="stat-val" id="sCount">0</div></div>
+    </div>
+  </div>
+
+  <div class="rate-bar">
+    <div class="rate-item">USD <span id="rUSD">—</span></div>
+    <div class="rate-item">JPY <span id="rJPY">—</span></div>
+    <div class="rate-item">EUR <span id="rEUR">—</span></div>
+    <div class="rate-updated" id="rTime">匯率載入中…</div>
+  </div>
+
+  <div id="assetList"></div>
+</div>
+
+<button class="fab" onclick="openAdd()">＋ 新增資產</button>
+
+<!-- Add/Edit Modal -->
+<div class="overlay" id="addModal">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 id="mTitle">新增資產</h3>
+    <div class="field">
+      <label>資產名稱</label>
+      <input id="mName" placeholder="例：台積電、比特幣、郵局活存">
+    </div>
+    <div class="field">
+      <label>類別</label>
+      <select id="mType" onchange="toggleFields()">
+        <option value="tw">🇹🇼 台灣上市股票（.TW）</option>
+      <option value="two">🇹🇼 台灣上櫃股票（.TWO）</option>
+        <option value="cb">📄 可轉換公司債 (CB)</option>
+        <option value="us">🇺🇸 美國股票</option>
+        <option value="crypto">₿ 加密貨幣</option>
+        <option value="cash">🏦 台幣現金／存款</option>
+        <option value="fx">💱 外幣存款</option>
+      </select>
+    </div>
+
+    <div id="gStock">
+      <div class="field">
+        <label id="tickerLabel">股票代號</label>
+        <input id="mTicker" placeholder="例：2330">
+        <div class="hint" id="tickerHint">台股輸入4位數代號，如 2330（台積電）</div>
+      </div>
+      <div class="field">
+        <label>持有數量（股）</label>
+        <input id="mQty" type="number" placeholder="0" inputmode="decimal">
+      </div>
+    </div>
+
+    <div id="gCB" style="display:none">
+      <div class="field">
+        <label>CB 代號（6碼）</label>
+        <input id="mCBTicker" placeholder="例：123201">
+        <div class="hint">可轉債代號為6碼，如 123201（國巨一）</div>
+      </div>
+      <div class="field">
+        <label>持有張數</label>
+        <input id="mCBQty" type="number" placeholder="0" inputmode="decimal">
+        <div class="hint">1張 = 面額 NT$100,000</div>
+      </div>
+    </div>
+
+    <div id="gCrypto" style="display:none">
+      <div class="field">
+        <label>CoinGecko ID</label>
+        <input id="mCGId" placeholder="例：bitcoin、ethereum、solana">
+        <div class="hint">請輸入 CoinGecko 上的 ID（全小寫），不是代碼縮寫</div>
+      </div>
+      <div class="field">
+        <label>持有數量</label>
+        <input id="mCryptoQty" type="number" placeholder="0" inputmode="decimal">
+      </div>
+    </div>
+
+    <div id="gFX" style="display:none">
+      <div class="row2">
+        <div class="field">
+          <label>幣別</label>
+          <select id="mCcy">
+            <option value="USD">USD 美元</option>
+            <option value="JPY">JPY 日圓</option>
+            <option value="EUR">EUR 歐元</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>外幣金額</label>
+          <input id="mFxAmt" type="number" placeholder="0" inputmode="decimal">
+        </div>
+      </div>
+    </div>
+
+    <div id="gCash" style="display:none">
+      <div class="field">
+        <label>台幣金額 (NT$)</label>
+        <input id="mAmount" type="number" placeholder="0" inputmode="decimal">
+      </div>
+    </div>
+
+    <button class="btn-save" id="saveBtn" onclick="saveAsset()">儲存</button>
+    <button class="btn-cancel" onclick="closeModal('addModal')">取消</button>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="overlay" id="detailModal">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="detail-header">
+      <div class="detail-icon" id="dIcon"></div>
+      <div>
+        <div style="font-size:16px;font-weight:700" id="dName"></div>
+        <div style="font-size:12px;color:var(--dim);margin-top:2px" id="dTypeLabel"></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px">台幣估值</div>
+    <div class="detail-value-big" id="dValue"></div>
+    <div class="detail-grid" id="dGrid"></div>
+    <div class="btn-row">
+      <button class="btn-edit-d" onclick="editFromDetail()">✎ 修改</button>
+      <button class="btn-del-d" id="dDelBtn" onclick="confirmDel()">刪除</button>
+    </div>
+    <button class="btn-cancel" onclick="closeModal('detailModal')">關閉</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+const KEY = 'wt_v4';
+let assets = JSON.parse(localStorage.getItem(KEY) || '[]');
+let rates = { USD: 32.5, JPY: 0.212, EUR: 35.5 };
+let rateAt = null;
+let editIdx = -1;
+let detailIdx = -1;
+let delReady = false;
+
+function persist() { localStorage.setItem(KEY, JSON.stringify(assets)); }
+
+// ── Toast ──────────────────────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ── Cloudflare Worker Proxy ────────────────────────────────────────
+const WORKER = 'https://stock-proxy.madea104.workers.dev';
+
+// 全市場報價快取（透過 Worker 抓取）
+let twseCache = {};   // 上市股票
+let tpexCache = {};   // 上櫃股票
+let cacheAt = null;
+
+async function loadAllPrices() {
+  try {
+    const [twseRes, tpexRes] = await Promise.all([
+      fetch(WORKER + '?type=twse', { signal: AbortSignal.timeout(15000) }),
+      fetch(WORKER + '?type=tpex', { signal: AbortSignal.timeout(15000) })
+    ]);
+    if (twseRes.ok) twseCache = await twseRes.json();
+    if (tpexRes.ok) tpexCache = await tpexRes.json();
+    cacheAt = new Date();
+    console.log('報價載入：上市', Object.keys(twseCache).length, '筆，上櫃', Object.keys(tpexCache).length, '筆');
+  } catch(e) {
+    console.log('報價載入失敗:', e.message);
+  }
+}
+
+// ── FX Rates ───────────────────────────────────────────────────────
+async function updateRates() {
+  try {
+    const r = await fetch(WORKER + '?type=fx', { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw 0;
+    const d = await r.json();
+    if (d.rates?.USD) rates.USD = +(1/d.rates.USD).toFixed(3);
+    if (d.rates?.JPY) rates.JPY = +(1/d.rates.JPY).toFixed(4);
+    if (d.rates?.EUR) rates.EUR = +(1/d.rates.EUR).toFixed(3);
+    rateAt = new Date();
+  } catch {}
+  renderRates();
+}
+
+function renderRates() {
+  document.getElementById('rUSD').textContent = rates.USD.toFixed(2);
+  document.getElementById('rJPY').textContent = rates.JPY.toFixed(3);
+  document.getElementById('rEUR').textContent = rates.EUR.toFixed(2);
+  const timeStr = cacheAt
+    ? cacheAt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) + ' 更新'
+    : (rateAt ? rateAt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) + ' 匯率' : '預設匯率');
+  document.getElementById('rTime').textContent = timeStr;
+}
+
+// ── Price Fetchers ─────────────────────────────────────────────────
+async function fetchPrice(a) {
+  a.priceCcy = 'TWD';
+
+  if (a.type === 'tw') {
+    const c = twseCache[a.ticker];
+    if (c?.price) { a.price = c.price; a.priceCcy = 'TWD'; a.priceAt = cacheAt?.toISOString(); return; }
+
+  } else if (a.type === 'two') {
+    const c = tpexCache[a.ticker];
+    if (c?.price) { a.price = c.price; a.priceCcy = 'TWD'; a.priceAt = cacheAt?.toISOString(); return; }
+
+  } else if (a.type === 'cb') {
+    // CB：先試上市快取，再試上櫃快取，最後試 Worker 即時查
+    const c = twseCache[a.ticker] || tpexCache[a.ticker];
+    if (c?.price) { a.price = c.price; a.priceCcy = 'TWD'; a.priceAt = cacheAt?.toISOString(); return; }
+    try {
+      const r = await fetch(WORKER + '?type=cb&ticker=' + encodeURIComponent(a.ticker), { signal: AbortSignal.timeout(10000) });
+      const d = await r.json();
+      const p = d[a.ticker]?.price;
+      if (p) { a.price = p; a.priceCcy = 'TWD'; a.priceAt = new Date().toISOString(); return; }
+    } catch {}
+
+  } else if (a.type === 'us') {
+    // 美股：透過 Worker 抓 Yahoo Finance
+    try {
+      const r = await fetch(WORKER + '?type=us&ticker=' + encodeURIComponent(a.ticker), { signal: AbortSignal.timeout(10000) });
+      const d = await r.json();
+      const p = d[a.ticker]?.price;
+      if (p) { a.price = p; a.priceCcy = 'USD'; a.priceAt = new Date().toISOString(); return; }
+    } catch {}
+
+  } else if (a.type === 'crypto') {
+    try {
+      const r = await fetch(WORKER + '?type=crypto&id=' + encodeURIComponent(a.ticker.toLowerCase()), { signal: AbortSignal.timeout(10000) });
+      const d = await r.json();
+      const p = d[a.ticker.toLowerCase()]?.twd;
+      if (p) { a.price = p; a.priceCcy = 'TWD'; a.priceAt = new Date().toISOString(); return; }
+    } catch {}
+  }
+
+  // 最後備援：保留上次報價，或請使用者手動輸入
+  if (!a.price) {
+    const v = prompt(`⚠️ [${a.name}] 無法自動取得報價\n請手動輸入目前單價：`);
+    a.price = parseFloat(v) || 0;
+    a.priceAt = null;
+  }
+}
+
+// ── Calc value ─────────────────────────────────────────────────────
+function calcValue(a) {
+  if (a.type === 'cash') return a.amount || 0;
+  if (a.type === 'fx')   return (a.fxAmt || 0) * (rates[a.ccy] || 1);
+  const p = a.price || 0, q = a.qty || 0;
+  if (a.type === 'cb') {
+    // CB: 報價為 % of 100，1張面額10萬
+    // Yahoo 回傳的 CB 報價通常是 TWD/張 或 % 形式
+    // 保守處理：若報價 < 200 視為 % 格式 (如 102.5 = 102.5%)，否則視為直接報價(元/張)
+    if (p < 200) return (p / 100) * 100000 * q;
+    return p * q;
+  }
+  if (a.type === 'us') return p * q * rates.USD; // 美股永遠用 USD 換算
+  if (a.priceCcy === 'USD') return p * q * rates.USD;
+  return p * q;
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────
+const typeMap = {
+  tw:'台股(上市)', two:'台股(上櫃)', cb:'可轉債', us:'美股', crypto:'加密貨幣', cash:'台幣現金', fx:'外幣存款'
+};
+const colorMap = {
+  tw:   ['rgba(80,160,255,.12)','#60aaff'],
+  two:  ['rgba(80,160,255,.12)','#60aaff'],
+  cb:   ['rgba(245,216,122,.12)','#f5d87a'],
+  us:   ['rgba(200,130,255,.12)','#c882ff'],
+  crypto:['rgba(78,203,142,.12)','#4ecb8e'],
+  cash: ['rgba(78,203,142,.12)','#4ecb8e'],
+  fx:   ['rgba(245,216,122,.15)','#f5d87a']
+};
+
+function initials(s) {
+  if (!s) return '?';
+  s = s.trim();
+  if (/^[A-Z0-9]{1,6}$/i.test(s)) return s.slice(0,4).toUpperCase();
+  return s.slice(0,1).toUpperCase();
+}
+
+function shortNum(n) {
+  if (n >= 1e8) return (n/1e8).toFixed(1)+'億';
+  if (n >= 1e4) return (n/1e4).toFixed(1)+'萬';
+  return Math.round(n).toLocaleString();
+}
+
+// ── Render ─────────────────────────────────────────────────────────
+function render() {
+  const list = document.getElementById('assetList');
+  if (!assets.length) {
+    list.innerHTML = `<div class="empty"><div style="font-size:36px">📊</div><p>尚未新增任何資產<br>點擊下方按鈕開始追蹤</p></div>`;
+    document.getElementById('totalValue').textContent = 'NT$ 0';
+    ['sInvest','sCash','sCount'].forEach(id => document.getElementById(id).textContent = '—');
+    return;
+  }
+
+  const vals = assets.map(calcValue);
+  const total = vals.reduce((a,b)=>a+b, 0);
+  const investTotal = assets.reduce((s,a,i) => !['cash','fx'].includes(a.type) ? s+vals[i] : s, 0);
+  const cashTotal   = assets.reduce((s,a,i) =>  ['cash','fx'].includes(a.type) ? s+vals[i] : s, 0);
+
+  const order = ['tw','two','cb','us','crypto','fx','cash'];
+  const subGroups = [
+    { label:'台灣股票（上市）',  types:['tw'] },
+    { label:'台灣股票（上櫃）',  types:['two'] },
+    { label:'可轉換公司債',      types:['cb'] },
+    { label:'美國股票',          types:['us'] },
+    { label:'加密貨幣',          types:['crypto'] },
+    { label:'現金 & 外幣',       types:['cash','fx'] },
+  ];
+
+  list.innerHTML = '';
+  subGroups.forEach(g => {
+    const items = assets.map((a,i)=>({a,i,v:vals[i]}))
+      .filter(x => g.types.includes(x.a.type))
+      .sort((x,y) => order.indexOf(x.a.type) - order.indexOf(y.a.type));
+    if (!items.length) return;
+    const subtotal = items.reduce((s,x) => s+x.v, 0);
+    list.innerHTML += `<div class="section-label">${g.label}</div>`;
+    items.forEach(({a,i,v}) => {
+      const [bg,fg] = colorMap[a.type] || colorMap.tw;
+      const pct = total > 0 ? ((v/total)*100).toFixed(1)+'%' : '—';
+      let meta = '';
+      if (['tw','two','us','cb'].includes(a.type) && a.price) {
+        meta = `${a.price.toLocaleString('zh-TW',{maximumFractionDigits:2})} ${a.priceCcy} × ${(a.qty||0).toLocaleString()}`;
+      } else if (a.type === 'crypto' && a.price) {
+        meta = `${a.price.toLocaleString()} TWD × ${a.qty||0}`;
+      } else if (a.type === 'fx') {
+        meta = `${(a.fxAmt||0).toLocaleString()} ${a.ccy} × ${rates[a.ccy]?.toFixed(3)||'?'}`;
+      }
+      list.innerHTML += `<div class="asset-card" onclick="openDetail(${i})">
+        <div class="asset-icon" style="background:${bg};color:${fg}">${initials(a.ticker||a.name)}</div>
+        <div class="asset-info">
+          <div class="asset-name">${a.name}</div>
+          <div class="asset-meta">${meta || typeMap[a.type]||''}</div>
+        </div>
+        <div class="asset-right">
+          <div class="asset-value">NT$ ${Math.round(v).toLocaleString()}</div>
+          <div class="asset-pct">${pct}</div>
+        </div>
+      </div>`;
+    });
+    list.innerHTML += `<div class="subtotal">
+      <div class="subtotal-label">小計</div>
+      <div class="subtotal-val">NT$ ${Math.round(subtotal).toLocaleString()}</div>
+    </div>`;
+  });
+
+  document.getElementById('totalValue').textContent = 'NT$ ' + Math.round(total).toLocaleString();
+  document.getElementById('sInvest').textContent = 'NT$ ' + shortNum(investTotal);
+  document.getElementById('sCash').textContent   = 'NT$ ' + shortNum(cashTotal);
+  document.getElementById('sCount').textContent  = assets.length + ' 項';
+}
+
+// ── Detail ─────────────────────────────────────────────────────────
+function openDetail(i) {
+  detailIdx = i; delReady = false;
+  const a = assets[i], v = calcValue(a);
+  const [bg,fg] = colorMap[a.type] || colorMap.tw;
+  const total = assets.reduce((s,x)=>s+calcValue(x),0);
+  const pct = total > 0 ? ((v/total)*100).toFixed(2)+'%' : '—';
+
+  document.getElementById('dIcon').style.cssText = `background:${bg};color:${fg}`;
+  document.getElementById('dIcon').textContent = initials(a.ticker||a.name);
+  document.getElementById('dName').textContent = a.name;
+  document.getElementById('dTypeLabel').textContent = typeMap[a.type]||'';
+  document.getElementById('dValue').textContent = 'NT$ ' + Math.round(v).toLocaleString();
+
+  let grid = `<div class="detail-cell"><div class="detail-cell-label">佔總資產</div><div class="detail-cell-val">${pct}</div></div>`;
+  if (['tw','two','cb','us','crypto'].includes(a.type)) {
+    const pa = a.priceAt ? new Date(a.priceAt).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+    grid += `<div class="detail-cell"><div class="detail-cell-label">報價</div><div class="detail-cell-val">${(a.price||0).toLocaleString('zh-TW',{maximumFractionDigits:4})} ${a.priceCcy||''}</div></div>
+    <div class="detail-cell"><div class="detail-cell-label">數量</div><div class="detail-cell-val">${(a.qty||0).toLocaleString()}</div></div>
+    <div class="detail-cell"><div class="detail-cell-label">更新時間</div><div class="detail-cell-val" style="font-size:11px">${pa}</div></div>`;
+  } else if (a.type === 'fx') {
+    grid += `<div class="detail-cell"><div class="detail-cell-label">外幣金額</div><div class="detail-cell-val">${(a.fxAmt||0).toLocaleString()} ${a.ccy}</div></div>
+    <div class="detail-cell"><div class="detail-cell-label">匯率</div><div class="detail-cell-val">${rates[a.ccy]?.toFixed(4)||'—'}</div></div>`;
+  } else {
+    grid += `<div class="detail-cell"><div class="detail-cell-label">台幣金額</div><div class="detail-cell-val">NT$ ${(a.amount||0).toLocaleString()}</div></div>`;
+  }
+  document.getElementById('dGrid').innerHTML = grid;
+  const delBtn = document.getElementById('dDelBtn');
+  delBtn.textContent = '刪除'; delBtn.className = 'btn-del-d';
+  document.getElementById('detailModal').classList.add('open');
+}
+
+function confirmDel() {
+  const btn = document.getElementById('dDelBtn');
+  if (!delReady) { delReady=true; btn.textContent='確認刪除'; btn.className='btn-del-d confirm'; return; }
+  assets.splice(detailIdx,1); persist(); render();
+  closeModal('detailModal'); toast('✓ 已刪除');
+}
+
+function editFromDetail() { closeModal('detailModal'); setTimeout(()=>openEdit(detailIdx), 200); }
+
+// ── Add / Edit ──────────────────────────────────────────────────────
+function toggleFields() {
+  const t = document.getElementById('mType').value;
+  document.getElementById('gStock').style.display  = ['tw','two','us'].includes(t) ? 'block':'none';
+  document.getElementById('gCB').style.display     = t==='cb'     ? 'block':'none';
+  document.getElementById('gCrypto').style.display = t==='crypto' ? 'block':'none';
+  document.getElementById('gFX').style.display     = t==='fx'     ? 'block':'none';
+  document.getElementById('gCash').style.display   = t==='cash'   ? 'block':'none';
+  if (['tw','two'].includes(t)) {
+    document.getElementById('tickerLabel').textContent='股票代號（台股上市/上櫃）';
+    document.getElementById('tickerHint').textContent='上市輸入4碼如 2330，上櫃輸入4碼如 5347';
+    document.getElementById('mTicker').placeholder='例：2330';
+  } else {
+    document.getElementById('tickerLabel').textContent='股票代號（美股）';
+    document.getElementById('tickerHint').textContent='輸入美股代號，如 AAPL、NVDA、TSLA';
+    document.getElementById('mTicker').placeholder='例：AAPL';
+  }
+}
+
+function clearForm() {
+  ['mName','mTicker','mQty','mCBTicker','mCBQty','mCGId','mCryptoQty','mFxAmt','mAmount']
+    .forEach(id => document.getElementById(id).value='');
+  document.getElementById('mType').value='tw';
+  document.getElementById('mCcy').value='USD';
+  toggleFields();
+}
+
+function openAdd() {
+  editIdx = -1;
+  document.getElementById('mTitle').textContent = '新增資產';
+  clearForm();
+  document.getElementById('addModal').classList.add('open');
+}
+
+function openEdit(i) {
+  editIdx = i;
+  const a = assets[i];
+  document.getElementById('mTitle').textContent = '修改資產';
+  document.getElementById('mName').value = a.name||'';
+  document.getElementById('mType').value = a.type||'tw';
+  toggleFields();
+  if (['tw','two','us'].includes(a.type)) {
+    document.getElementById('mTicker').value = a.ticker||'';
+    document.getElementById('mQty').value = a.qty||'';
+  } else if (a.type==='cb') {
+    document.getElementById('mCBTicker').value = a.ticker||'';
+    document.getElementById('mCBQty').value = a.qty||'';
+  } else if (a.type==='crypto') {
+    document.getElementById('mCGId').value = a.ticker||'';
+    document.getElementById('mCryptoQty').value = a.qty||'';
+  } else if (a.type==='fx') {
+    document.getElementById('mCcy').value = a.ccy||'USD';
+    document.getElementById('mFxAmt').value = a.fxAmt||'';
+  } else {
+    document.getElementById('mAmount').value = a.amount||'';
+  }
+  document.getElementById('addModal').classList.add('open');
+}
+
+async function saveAsset() {
+  const name = document.getElementById('mName').value.trim();
+  if (!name) { toast('⚠️ 請輸入資產名稱'); return; }
+  const type = document.getElementById('mType').value;
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = ['cash','fx'].includes(type) ? '儲存中…' : '取得報價中…';
+
+  let ticker='', qty=0;
+  if (['tw','two','us'].includes(type)) {
+    ticker = document.getElementById('mTicker').value.trim().toUpperCase();
+    qty = parseFloat(document.getElementById('mQty').value)||0;
+  } else if (type==='cb') {
+    ticker = document.getElementById('mCBTicker').value.trim();
+    qty = parseFloat(document.getElementById('mCBQty').value)||0;
+  } else if (type==='crypto') {
+    ticker = document.getElementById('mCGId').value.trim().toLowerCase();
+    qty = parseFloat(document.getElementById('mCryptoQty').value)||0;
+  }
+
+  const prev = editIdx > -1 ? assets[editIdx] : {};
+  const a = {
+    name, type, ticker, qty,
+    ccy:    document.getElementById('mCcy').value,
+    fxAmt:  parseFloat(document.getElementById('mFxAmt').value)||0,
+    amount: parseFloat(document.getElementById('mAmount').value)||0,
+    price:  prev.price||0, priceCcy: prev.priceCcy||'TWD', priceAt: prev.priceAt||null
+  };
+
+  if (!['cash','fx'].includes(type)) await fetchPrice(a);
+
+  if (editIdx > -1) assets[editIdx]=a; else assets.push(a);
+  persist(); render();
+  closeModal('addModal');
+  btn.disabled=false; btn.textContent='儲存';
+  toast(editIdx > -1 ? '✓ 已更新' : '✓ 已新增');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+document.querySelectorAll('.overlay').forEach(el =>
+  el.addEventListener('click', e => { if(e.target===el) el.classList.remove('open'); }));
+
+// ── Refresh all ────────────────────────────────────────────────────
+async function refreshAll() {
+  const btn=document.getElementById('refBtn'), icon=document.getElementById('refIcon');
+  btn.classList.add('loading'); icon.classList.add('spin');
+  await Promise.all([updateRates(), loadAllPrices()]);
+  const inv = assets.filter(a=>!['cash','fx'].includes(a.type));
+  for (const a of inv) await fetchPrice(a);
+  persist(); render();
+  btn.classList.remove('loading'); icon.classList.remove('spin');
+  toast(`✓ 已更新 ${inv.length} 項報價`);
+}
+
+// ── 匯出 / 匯入 ────────────────────────────────────────────────────
+function exportData() {
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    assets: assets
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'wealth-tracker-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('✓ 已匯出資料');
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      // 支援直接存 array 或包在 {assets:[]} 裡的格式
+      const imported = Array.isArray(data) ? data : (data.assets || []);
+      if (!imported.length) { toast('⚠️ 檔案內沒有資產資料'); return; }
+      if (!confirm(`確定要匯入 ${imported.length} 筆資產？目前資料將被取代。`)) return;
+      assets = imported;
+      persist();
+      render();
+      toast(`✓ 已匯入 ${imported.length} 筆資產`);
+    } catch {
+      toast('⚠️ 檔案格式錯誤，請選擇正確的 JSON 檔案');
+    }
+    // 清除 input 讓同一個檔案可以再次匯入
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+// ── Init ───────────────────────────────────────────────────────────
+renderRates();
+render();
+Promise.all([updateRates(), loadAllPrices()]).then(() => { renderRates(); render(); });
+</script>
+</body>
+</html>
