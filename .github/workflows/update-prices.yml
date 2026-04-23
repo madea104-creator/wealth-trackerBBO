@@ -107,7 +107,39 @@ jobs:
               print(f"  OK: {count} 筆")
           except Exception as e:
               print(f"  FAIL: {e}")
-          time.sleep(2)
+          time.sleep(1)
+
+          # ── 1b. 上市ETF（TWSE ETF，STOCK_DAY_ALL 不含ETF需另外抓）───
+          print("\n[1b] 上市ETF...")
+          try:
+              url = f'https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={today}&type=ETF'
+              content_etf = fetch(url)
+              data_etf = json.loads(content_etf)
+              count = 0
+              for table in data_etf.get('tables', []):
+                  fields = table.get('fields', [])
+                  rows   = table.get('data', [])
+                  if not rows or not fields: continue
+                  try:
+                      code_idx  = next(i for i,f in enumerate(fields) if '代號' in str(f) or 'Code' in str(f))
+                      close_idx = next(i for i,f in enumerate(fields) if '收盤' in str(f) or 'Close' in str(f))
+                  except StopIteration:
+                      continue
+                  for row in rows:
+                      if len(row) <= max(code_idx, close_idx): continue
+                      ticker = str(row[code_idx]).strip()
+                      close  = str(row[close_idx]).strip().replace(',','')
+                      if not ticker or not close or close in ('--','-',''): continue
+                      try:
+                          price = float(close)
+                          if price > 0 and ticker not in result:
+                              result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'twse_etf'}
+                              count += 1
+                      except: pass
+              print(f"  OK: {count} 筆")
+          except Exception as e:
+              print(f"  FAIL: {e}")
+          time.sleep(1)
 
           # ── 2. 上櫃股票（TPEx）───────────────────────────────────
           print(f"\n[2] 上櫃股票（TPEx）...")
