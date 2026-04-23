@@ -394,7 +394,12 @@ async function fetchPrice(a) {
   } else if (a.type === 'us') {
     // 美股：先試 cache，再試 Yahoo Finance 直接呼叫
     const c = getPriceFromCache(a.ticker);
-    if (c?.price) { a.price = c.price; a.priceCcy = 'USD'; a.priceAt = priceCacheAt?.toISOString() || new Date().toISOString(); return; }
+    if (c?.price) { 
+      a.price = c.price; 
+      a.priceCcy = 'USD'; // 美股永遠是 USD，不管 cache 裡存什麼
+      a.priceAt = priceCacheAt?.toISOString() || new Date().toISOString(); 
+      return; 
+    }
     // 直接試 Yahoo（美股 CORS 比台股寬鬆）
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(a.ticker)}?interval=1d&range=1d`;
@@ -427,6 +432,7 @@ function calcValue(a) {
     if (p < 200) return (p / 100) * 100000 * q;
     return p * q;
   }
+  if (a.type === 'us') return p * q * rates.USD; // 美股永遠用 USD 換算
   if (a.priceCcy === 'USD') return p * q * rates.USD;
   return p * q;
 }
