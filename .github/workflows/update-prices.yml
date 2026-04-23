@@ -2,9 +2,9 @@ name: Update Stock Prices
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5'   # 台灣時間 14:30（週一到週五收盤後）
-    - cron: '0 1 * * 1-5'    # 台灣時間 09:00（開盤前，抓昨收）
-  workflow_dispatch:           # 允許手動觸發
+    - cron: '30 6 * * 1-5'    # 台灣時間 14:30（週一到週五，收盤後）
+    - cron: '0 1 * * 1-5'     # 台灣時間 09:00（開盤前，確保有昨收價）
+  workflow_dispatch:            # 允許手動觸發
 
 jobs:
   update:
@@ -16,126 +16,175 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch prices and write prices.json
+      - name: Fetch all market prices
         run: |
           python3 << 'EOF'
           import urllib.request
           import json
+          import csv
           import time
+          import datetime
+          import io
 
           result = {}
 
-          # 讀取 tickers.json 取得要抓的清單
-          try:
-              with open('tickers.json', 'r') as f:
-                  tickers = json.load(f)
-          except:
-              tickers = {"tw": [], "two": [], "cb": [], "us": [], "crypto": []}
-
           headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0',
+              'Accept': 'text/html,application/json,*/*',
+              'Accept-Language': 'zh-TW,zh;q=0.9',
           }
 
-          # ── 台股上市（TSE）──────────────────────────────────
-          for ticker in tickers.get('tw', []):
-              try:
-                  url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{ticker}.tw&json=1&delay=0'
-                  req = urllib.request.Request(url, headers=headers)
-                  with urllib.request.urlopen(req, timeout=10) as r:
-                      data = json.loads(r.read())
-                  item = data.get('msgArray', [{}])[0]
-                  z = item.get('z', '-')
-                  y = item.get('y', '-')
-                  price = float(z) if z != '-' else float(y) if y != '-' else None
-                  if price:
-                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'twse'}
-                      print(f'✓ {ticker}: {price}')
-              except Exception as e:
-                  print(f'✗ {ticker}: {e}')
-              time.sleep(0.3)
+          def fetch(url, timeout=20):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return r.read().decode('utf-8-sig', errors='ignore')
 
-          # ── 台股上櫃（OTC）──────────────────────────────────
-          for ticker in tickers.get('two', []):
-              try:
-                  url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{ticker}.tw&json=1&delay=0'
-                  req = urllib.request.Request(url, headers=headers)
-                  with urllib.request.urlopen(req, timeout=10) as r:
-                      data = json.loads(r.read())
-                  item = data.get('msgArray', [{}])[0]
-                  z = item.get('z', '-')
-                  y = item.get('y', '-')
-                  price = float(z) if z != '-' else float(y) if y != '-' else None
-                  if price:
-                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'otc'}
-                      print(f'✓ {ticker}: {price}')
-              except Exception as e:
-                  print(f'✗ {ticker}: {e}')
-              time.sleep(0.3)
-
-          # ── 可轉債（CB）────────────────────────────────────
-          for ticker in tickers.get('cb', []):
-              fetched = False
-              for ex in ['tse', 'otc']:
+          # 1. 台灣上市股票（含ETF）
+          print("抓取上市股票（TWSE）...")
+          try:
+              url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data'
+              content = fetch(url)
+              reader = csv.reader(io.StringIO(content))
+              count = 0
+              for i, row in enumerate(reader):
+                  if i == 0:
+                      continue
+                  if len(row) < 9:
+                      continue
+                  ticker = row[0].strip()
+                  close  = row[8].strip().replace(',', '')
+                  if not ticker or not close or close in ('--', '-', ''):
+                      continue
                   try:
-                      url = f'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex}_{ticker}.tw&json=1&delay=0'
-                      req = urllib.request.Request(url, headers=headers)
-                      with urllib.request.urlopen(req, timeout=10) as r:
-                          data = json.loads(r.read())
-                      item = data.get('msgArray', [{}])[0]
-                      z = item.get('z', '-')
-                      y = item.get('y', '-')
-                      price = float(z) if z != '-' else float(y) if y != '-' else None
-                      if price:
-                          result[ticker] = {'price': price, 'ccy': 'TWD', 'src': ex}
-                          print(f'✓ CB {ticker}: {price}')
-                          fetched = True
-                          break
-                  except Exception as e:
-                      print(f'✗ CB {ticker}/{ex}: {e}')
-                  time.sleep(0.3)
+                      price = float(close)
+                      if price > 0:
+                          result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'twse'}
+                          count += 1
+                  except:
+                      pass
+              print(f"  OK: {count} 筆")
+          except Exception as e:
+              print(f"  FAIL: {e}")
 
-          # ── 美股（Yahoo Finance）───────────────────────────
-          for ticker in tickers.get('us', []):
+          time.sleep(2)
+
+          # 2. 台灣上櫃股票（含ETF）
+          print("抓取上櫃股票（TPEx）...")
+          try:
+              url = 'https://www.tpex.org.tw/web/stock/aftertrading/DAILY_CLOSE_quotes/stk_quote_result.php?l=zh-tw&o=data'
+              content = fetch(url)
+              reader = csv.reader(io.StringIO(content))
+              count = 0
+              for i, row in enumerate(reader):
+                  if i < 3:
+                      continue
+                  if len(row) < 3:
+                      continue
+                  ticker = row[0].strip()
+                  close  = row[2].strip().replace(',', '')
+                  if not ticker or not close or close in ('--', '-', ''):
+                      continue
+                  try:
+                      price = float(close)
+                      if price > 0 and ticker not in result:
+                          result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'tpex'}
+                          count += 1
+                  except:
+                      pass
+              print(f"  OK: {count} 筆")
+          except Exception as e:
+              print(f"  FAIL: {e}")
+
+          time.sleep(2)
+
+          # 3. 可轉換公司債（CB）
+          print("抓取可轉換公司債（CB）...")
+          cb_count = 0
+
+          # 上市CB（TWSE債券行情）
+          for cb_url in [
+              'https://www.twse.com.tw/rwd/zh/bond/BWCV?response=json',
+              'https://www.twse.com.tw/exchangeReport/BWCV?response=json'
+          ]:
               try:
-                  url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d'
-                  req = urllib.request.Request(url, headers=headers)
-                  with urllib.request.urlopen(req, timeout=10) as r:
-                      data = json.loads(r.read())
-                  price = data['chart']['result'][0]['meta']['regularMarketPrice']
-                  if price:
-                      result[ticker] = {'price': price, 'ccy': 'USD', 'src': 'yahoo'}
-                      print(f'✓ {ticker}: {price}')
+                  content = fetch(cb_url)
+                  data = json.loads(content)
+                  for row in data.get('data', []):
+                      if len(row) < 5:
+                          continue
+                      ticker = str(row[0]).strip()
+                      close  = str(row[4]).strip().replace(',', '')
+                      if not close or close in ('-', '--', ''):
+                          continue
+                      try:
+                          price = float(close)
+                          if price > 0:
+                              result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'twse_cb'}
+                              cb_count += 1
+                      except:
+                          pass
+                  if cb_count > 0:
+                      break
               except Exception as e:
-                  print(f'✗ {ticker}: {e}')
-              time.sleep(0.5)
+                  print(f"  上市CB {cb_url} FAIL: {e}")
 
-          # ── 加密貨幣（CoinGecko）──────────────────────────
-          crypto_list = tickers.get('crypto', [])
-          if crypto_list:
-              try:
-                  ids = ','.join(crypto_list)
-                  url = f'https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=twd'
-                  req = urllib.request.Request(url, headers=headers)
-                  with urllib.request.urlopen(req, timeout=15) as r:
-                      data = json.loads(r.read())
-                  for cid in crypto_list:
-                      price = data.get(cid, {}).get('twd')
-                      if price:
-                          result[cid] = {'price': price, 'ccy': 'TWD', 'src': 'coingecko'}
-                          print(f'✓ {cid}: {price}')
-              except Exception as e:
-                  print(f'✗ crypto batch: {e}')
+          time.sleep(1)
 
-          # 寫入 prices.json
-          import datetime
+          # 上櫃CB（TPEx債券行情）
+          try:
+              url = 'https://www.tpex.org.tw/web/bond/search/daily/bd_daily_result.php?l=zh-tw&o=data&t=C'
+              content = fetch(url)
+              reader = csv.reader(io.StringIO(content))
+              for i, row in enumerate(reader):
+                  if i < 2:
+                      continue
+                  if len(row) < 3:
+                      continue
+                  ticker = row[0].strip()
+                  close  = row[2].strip().replace(',', '')
+                  if not close or close in ('-', '--', ''):
+                      continue
+                  try:
+                      price = float(close)
+                      if price > 0 and ticker not in result:
+                          result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'tpex_cb'}
+                          cb_count += 1
+                  except:
+                      pass
+          except Exception as e:
+              print(f"  上櫃CB FAIL: {e}")
+
+          print(f"  OK: {cb_count} 筆")
+          time.sleep(1)
+
+          # 4. 加密貨幣（CoinGecko Top 100）
+          print("抓取加密貨幣...")
+          try:
+              url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=twd&order=market_cap_desc&per_page=100&page=1'
+              content = fetch(url, timeout=25)
+              coins = json.loads(content)
+              count = 0
+              for coin in coins:
+                  cid   = coin.get('id', '')
+                  price = coin.get('current_price')
+                  if cid and price and price > 0:
+                      result[cid.lower()] = {'price': price, 'ccy': 'TWD', 'src': 'coingecko'}
+                      count += 1
+              print(f"  OK: {count} 筆")
+          except Exception as e:
+              print(f"  FAIL: {e}")
+
+          # 5. 寫入 prices.json
+          now_utc = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
           output = {
-              'updated': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-              'prices': result
+              'updated': now_utc,
+              'count':   len(result),
+              'prices':  result
           }
-          with open('prices.json', 'w') as f:
-              json.dump(output, f, ensure_ascii=False, indent=2)
-          print(f'\n寫入 prices.json，共 {len(result)} 筆')
+          with open('prices.json', 'w', encoding='utf-8') as f:
+              json.dump(output, f, ensure_ascii=False)
+
+          print(f"\nDONE: prices.json 共 {len(result)} 筆，{now_utc}")
           EOF
 
       - name: Commit prices.json
