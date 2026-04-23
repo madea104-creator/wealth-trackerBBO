@@ -248,6 +248,42 @@ jobs:
           print(f"  CB 合計補充: {cb_count} 筆")
           time.sleep(1)
 
+          # ── 3b. tickers.json 手動指定的個股/ETF ─────────────────
+          # 用 getStockInfo 補查 tickers.json 裡 tw/two 清單（ETF、特殊個股）
+          try:
+              with open('tickers.json', 'r') as f:
+                  tc = json.load(f)
+              manual_tw  = [t for t in tc.get('tw',  []) if t not in result]
+              manual_two = [t for t in tc.get('two', []) if t not in result]
+              manual_us  = [t for t in tc.get('us',  []) if t not in result]
+
+              if manual_tw:
+                  prices = batch_getStockInfo(manual_tw, 'tse')
+                  for ticker, price in prices.items():
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'tse_manual'}
+                  print(f"  手動上市: {len(prices)} 筆 ({manual_tw})")
+
+              if manual_two:
+                  prices = batch_getStockInfo(manual_two, 'otc')
+                  for ticker, price in prices.items():
+                      result[ticker] = {'price': price, 'ccy': 'TWD', 'src': 'otc_manual'}
+                  print(f"  手動上櫃: {len(prices)} 筆")
+
+              if manual_us:
+                  for ticker in manual_us:
+                      try:
+                          url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d'
+                          c = fetch(url, timeout=10)
+                          d = json.loads(c)
+                          p = d['chart']['result'][0]['meta']['regularMarketPrice']
+                          if p:
+                              result[ticker] = {'price': p, 'ccy': 'USD', 'src': 'yahoo_manual'}
+                      except: pass
+                  print(f"  手動美股查詢完成")
+          except Exception as e:
+              print(f"  手動清單 FAIL: {e}")
+          time.sleep(1)
+
           # ── 4. 加密貨幣（CoinGecko Top 100）────────────────────────
           print("\n[4] 加密貨幣...")
           try:
