@@ -2,8 +2,8 @@ name: Price Alert
 
 on:
   schedule:
-    - cron: '0 2 * * 1-5'   # 台灣時間 10:00（開盤後1小時）
-    - cron: '30 5 * * 1-5'  # 台灣時間 13:30（收盤前）
+    - cron: '0 2 * * 1-5'   # 台灣時間 10:00
+    - cron: '30 5 * * 1-5'  # 台灣時間 13:30
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          python3 << 'EOF'
+          python3 - << 'PYEOF'
           import urllib.request
           import json
           import time
@@ -24,20 +24,32 @@ jobs:
           import io
           import datetime
 
-          DISCORD_WEBHOOK = os.environ['DISCORD_WEBHOOK']
-          THRESHOLD = 2.0  # 漲跌超過 2% 才通知
+          DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK', '')
+          THRESHOLD = 2.0
 
           headers = {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0',
-              'Accept': 'application/json',
+              'Accept': 'application/json, text/plain, */*',
           }
 
-          def fetch_json(url, timeout=15):
+          def fetch_url(url, timeout=20):
               req = urllib.request.Request(url, headers=headers)
               with urllib.request.urlopen(req, timeout=timeout) as r:
-                  return json.loads(r.read())
+                  chunks = []
+                  while True:
+                      chunk = r.read(65536)
+                      if not chunk: break
+                      chunks.append(chunk)
+                  raw = b''.join(chunks)
+                  for enc in ['utf-8-sig', 'utf-8', 'big5']:
+                      try: return raw.decode(enc)
+                      except: pass
+                  return raw.decode('utf-8', errors='ignore')
 
           def send_discord(message):
+              if not DISCORD_WEBHOOK:
+                  print("DISCORD_WEBHOOK 未設定")
+                  return
               data = json.dumps({'content': message}).encode('utf-8')
               req = urllib.request.Request(
                   DISCORD_WEBHOOK,
@@ -45,10 +57,12 @@ jobs:
                   headers={'Content-Type': 'application/json'},
                   method='POST'
               )
-              urllib.request.urlopen(req, timeout=10)
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  print(f"Discord 回應: {r.status}")
 
           alerts = []
           now_tw = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+          print(f"台灣時間: {now_tw.strftime('%Y-%m-%d %H:%M')}")
 
           # ── 台灣上市股票 ──────────────────────────────────────
           TW_STOCKS = {
@@ -58,10 +72,7 @@ jobs:
           }
 
           try:
-              url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data'
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req, timeout=20) as r:
-                  content = r.read().decode('utf-8-sig', errors='ignore')
+              content = fetch_url('https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data')
               reader = csv.reader(io.StringIO(content))
               for i, row in enumerate(reader):
                   if i == 0: continue
@@ -76,6 +87,7 @@ jobs:
                       if abs(pct) >= THRESHOLD:
                           arrow = '🔺' if pct > 0 else '🔻'
                           alerts.append(f"{arrow} **{TW_STOCKS[ticker]}（{ticker}）** {close:.2f} TWD ({pct:+.2f}%)")
+                          print(f"  {ticker}: {pct:+.2f}%")
                   except: pass
               print(f"台股上市檢查完成")
           except Exception as e:
@@ -87,18 +99,23 @@ jobs:
           OTC_STOCKS = {'5347': '世界'}
 
           try:
-              url = f'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes?date={now_tw.strftime("%Y%m%d")}'
-              data = fetch_json(url)
-              for row in data:
-                  ticker = str(row.get('SecuritiesCompanyCode', '')).strip()
+              roc_year = now_tw.year - 1911
+              roc_date = f"{roc_year}/{now_tw.month:02d}/{now_tw.day:02d}"
+              url = f'https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d={roc_date}&_={int(time.time())}'
+              content = fetch_url(url)
+              data = json.loads(content)
+              for row in data.get('aaData', []):
+                  ticker = str(row[0]).strip()
                   if ticker not in OTC_STOCKS: continue
-                  close = float(str(row.get('Close', '0')).replace(',', '') or 0)
-                  prev  = float(str(row.get('PreviousClose', row.get('Yesterday', '0'))).replace(',', '') or 0)
-                  if close and prev:
-                      pct = ((close - prev) / prev) * 100
-                      if abs(pct) >= THRESHOLD:
-                          arrow = '🔺' if pct > 0 else '🔻'
-                          alerts.append(f"{arrow} **{OTC_STOCKS[ticker]}（{ticker}）** {close:.2f} TWD ({pct:+.2f}%)")
+                  try:
+                      close = float(str(row[2]).replace(',', ''))
+                      prev  = float(str(row[3]).replace(',', ''))
+                      if close and prev:
+                          pct = ((close - prev) / prev) * 100
+                          if abs(pct) >= THRESHOLD:
+                              arrow = '🔺' if pct > 0 else '🔻'
+                              alerts.append(f"{arrow} **{OTC_STOCKS[ticker]}（{ticker}）** {close:.2f} TWD ({pct:+.2f}%)")
+                  except: pass
               print(f"台股上櫃檢查完成")
           except Exception as e:
               print(f"台股上櫃 FAIL: {e}")
@@ -114,7 +131,8 @@ jobs:
           for ticker in US_STOCKS:
               try:
                   url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=2d'
-                  data = fetch_json(url)
+                  content = fetch_url(url)
+                  data  = json.loads(content)
                   meta  = data['chart']['result'][0]['meta']
                   price = meta.get('regularMarketPrice', 0)
                   prev  = meta.get('previousClose', 0) or meta.get('chartPreviousClose', 0)
@@ -123,9 +141,12 @@ jobs:
                       if abs(pct) >= THRESHOLD:
                           arrow = '🔺' if pct > 0 else '🔻'
                           alerts.append(f"{arrow} **{ticker}** {price:.2f} USD ({pct:+.2f}%)")
+                          print(f"  {ticker}: {pct:+.2f}%")
               except Exception as e:
                   print(f"美股 {ticker} FAIL: {e}")
               time.sleep(0.3)
+
+          print(f"美股檢查完成")
 
           # ── 發送通知 ──────────────────────────────────────────
           if alerts:
@@ -134,5 +155,8 @@ jobs:
               send_discord(msg)
               print(f"已發送 {len(alerts)} 則提醒")
           else:
-              print("沒有標的超過門檻，不發送通知")
-          EOF
+              # 測試時也發一則確認訊息
+              now_str = now_tw.strftime('%Y/%m/%d %H:%M')
+              send_discord(f"✅ **價格提醒系統正常運作** {now_str}\n目前沒有標的漲跌超過 {THRESHOLD}%")
+              print("沒有標的超過門檻")
+          PYEOF
